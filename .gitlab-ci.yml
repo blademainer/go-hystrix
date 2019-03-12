@@ -1,0 +1,9 @@
+before_script:
+  - go_build.sh
+
+test:
+  script:
+  - env
+  tags:
+  - docker
+
