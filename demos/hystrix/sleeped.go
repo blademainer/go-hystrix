@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/blademainer/go-hystrix/pkg/hystrix"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,15 +15,19 @@ type FakeCmd struct {
 
 var counter uint64
 
+const THREAD_NAME_CONTEXT_NAME = "THREAD_NAME"
+
 func (*FakeCmd) InvokeWithTimeout(context context.Context) error {
-	time.Sleep(50 * time.Millisecond)
+	fmt.Printf("Executing %v... \n", context.Value(THREAD_NAME_CONTEXT_NAME))
+	time.Sleep(1000 * time.Millisecond)
 	atomic.AddUint64(&counter, 1)
 	wg.Done()
+	fmt.Printf("Done %v... \n", context.Value(THREAD_NAME_CONTEXT_NAME))
 	return nil
 }
 
-func (*FakeCmd) Fallback(message string, err error) {
-	fmt.Println(message)
+func (*FakeCmd) Fallback(context context.Context, message string, err error) {
+	fmt.Printf("Fallback %v... message: %v error: %v \n", context.Value(THREAD_NAME_CONTEXT_NAME), message, err.Error())
 }
 
 var wg = sync.WaitGroup{}
@@ -32,13 +35,16 @@ var wg = sync.WaitGroup{}
 func main() {
 	pool := hystrix.InitPool(100, 50)
 	for i := 0; i < 1000; i++ {
+		time.Sleep(1 * time.Millisecond)
 		go func() {
-			duration := rand.Intn(100)
-			time.Sleep(time.Duration(duration) * time.Millisecond)
+			wg.Add(1)
+			c := context.WithValue(context.TODO(), THREAD_NAME_CONTEXT_NAME, fmt.Sprint(i))
+			//duration := rand.Intn(100)
 			f := &FakeCmd{}
-			e := pool.Submit(f)
-			if e == nil{
-				wg.Add(1)
+			e := pool.Submit(c, f)
+			if e != nil {
+				fmt.Println("e: ", e.Error())
+				wg.Done()
 			}
 		}()
 	}

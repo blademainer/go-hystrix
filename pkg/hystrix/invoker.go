@@ -12,8 +12,13 @@ import (
 type Pool struct {
 	Size        int           // 执行池大小
 	Timeout     time.Duration // 执行过期时间
-	commandChan chan ICommand
+	commandChan chan contextAndCommand
 	doneChan    chan bool
+}
+
+type contextAndCommand struct {
+	context context.Context
+	ICommand
 }
 
 func InitPool(poolSize int, timeoutMillSeconds int) *Pool {
@@ -23,7 +28,7 @@ func InitPool(poolSize int, timeoutMillSeconds int) *Pool {
 	pool := &Pool{}
 	pool.Size = poolSize
 	pool.Timeout = time.Duration(timeoutMillSeconds) * time.Millisecond
-	pool.commandChan = make(chan ICommand, poolSize)
+	pool.commandChan = make(chan contextAndCommand, poolSize)
 	pool.doneChan = make(chan bool, poolSize)
 	for i := 0; i < poolSize; i++ {
 		pool.doneChan <- true
@@ -48,8 +53,8 @@ func (pool *Pool) run() {
 	}
 }
 
-func (pool *Pool) invoke(cmd ICommand) {
-	timeout, cancelFunc := context.WithTimeout(context.TODO(), pool.Timeout)
+func (pool *Pool) invoke(cmd contextAndCommand) {
+	timeout, cancelFunc := context.WithTimeout(cmd.context, pool.Timeout)
 	defer func() {
 		pool.doneChan <- true
 	}()
@@ -57,21 +62,21 @@ func (pool *Pool) invoke(cmd ICommand) {
 	cmd.InvokeWithTimeout(timeout)
 }
 
-func (pool *Pool) Submit(cmd ICommand) error {
+func (pool *Pool) Submit(context context.Context, cmd ICommand) error {
 	select {
 	//case pool.commandChan <- cmd:
 	//	if logger.Log.IsDebugEnabled() {
 	//		logger.Log.Debugf("Submitted cmd: %v", cmd)
 	//	}
 	case <-pool.doneChan:
-		pool.commandChan <- cmd
+		pool.commandChan <- contextAndCommand{context: context, ICommand: cmd}
 		if logger.Log.IsDebugEnabled() {
 			logger.Log.Debugf("Submitted cmd: %v", cmd)
 		}
 		return nil
 	default:
 		e := errors.New("pool is full")
-		cmd.Fallback(e.Error(), e)
+		cmd.Fallback(context, e.Error(), e)
 		return e
 	}
 }
